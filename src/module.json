@@ -21,11 +21,11 @@
               "key": "cutoff",
               "label": "Cutoff",
               "type": "float",
-              "min": 20.0,
-              "max": 20000.0,
-              "default": 1000.0,
-              "step": 1.0,
-              "unit": "Hz"
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.02,
+              "unit": "%"
             },
             {
               "key": "resonance",
@@ -34,7 +34,8 @@
               "min": 0.0,
               "max": 1.0,
               "default": 0.2,
-              "step": 0.01
+              "step": 0.02,
+              "unit": "%"
             },
             {
               "key": "drive",
@@ -43,7 +44,8 @@
               "min": 0.0,
               "max": 1.0,
               "default": 0.0,
-              "step": 0.01
+              "step": 0.02,
+              "unit": "%"
             },
             {
               "key": "mix",
@@ -52,7 +54,8 @@
               "min": 0.0,
               "max": 1.0,
               "default": 1.0,
-              "step": 0.01
+              "step": 0.02,
+              "unit": "%"
             },
             {
               "key": "output",
@@ -94,8 +97,7 @@
             "drive",
             "mix",
             "output",
-            "mode",
-            "model"
+            "mode"
           ]
         }
       }

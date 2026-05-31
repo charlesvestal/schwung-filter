@@ -46,6 +46,17 @@ static inline float db_to_linear(float db) {
     return powf(10.0f, db / 20.0f);
 }
 
+/* Cutoff is a normalized 0..1 control mapped LOGARITHMICALLY to 20..20000 Hz
+ * (constant ratio per unit -> each knob detent is a fixed fraction of an octave,
+ * so the sweep feels even and covers the whole range in a reasonable turn).
+ * 20 * 1000^norm: norm 0 -> 20 Hz, norm 1 -> 20000 Hz. Smoothing the *normalized*
+ * value linearly is identical to smoothing log-Hz, so the anti-zipper smoother
+ * works unchanged. */
+#define CUTOFF_LOG_SPAN 6.9077553f   /* logf(20000/20) = logf(1000) */
+static inline float cutoff_norm_to_hz(float norm) {
+    return 20.0f * expf(norm * CUTOFF_LOG_SPAN);
+}
+
 /* ---- JSON helper ---- */
 static int json_get_number(const char *json, const char *key, float *out) {
     char pattern[64];
@@ -109,7 +120,7 @@ typedef struct {
     /* targets from set_param */
     int   model;            /* MODEL_SVF=0 (only one in M1) */
     int   mode;             /* svf_mode_t */
-    float cutoff_hz;        /* 20 to 20000 */
+    float cutoff;           /* 0 to 1, log-mapped to 20..20000 Hz */
     float resonance;        /* 0 to 1 */
     float drive;            /* 0 to 1 */
     float mix;              /* 0 to 1 */
@@ -117,7 +128,7 @@ typedef struct {
 
     /* dsp */
     svf_t fL, fR;
-    smoother_t sm_cut;      /* log-Hz */
+    smoother_t sm_cut;      /* normalized 0..1 (== log-Hz, see cutoff_norm_to_hz) */
     smoother_t sm_res;
     smoother_t sm_drive;
     smoother_t sm_mix;
@@ -154,7 +165,7 @@ static void* filter_create_instance(const char *module_dir, const char *config_j
     /* Defaults */
     inst->model      = MODEL_SVF;
     inst->mode       = SVF_LP;
-    inst->cutoff_hz  = 1000.0f;
+    inst->cutoff     = 0.5f;     /* ~632 Hz — clearly audible default */
     inst->resonance  = 0.2f;
     inst->drive      = 0.0f;
     inst->mix        = 1.0f;
@@ -167,7 +178,7 @@ static void* filter_create_instance(const char *module_dir, const char *config_j
     /* Smoothers */
     smooth_init(&inst->sm_cut, SAMPLE_RATE);
     smooth_set_tau(&inst->sm_cut, 0.018);
-    smooth_reset(&inst->sm_cut, logf(1000.0f));
+    smooth_reset(&inst->sm_cut, 0.5f);   /* normalized cutoff */
 
     smooth_init(&inst->sm_res, SAMPLE_RATE);
     smooth_set_tau(&inst->sm_res, 0.020);
@@ -209,9 +220,9 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
      * nonlinear models (sustained tiny feedback residue), add an explicit flush
      * to the per-sample state. Keep -ffast-math until then. */
     for (int i = 0; i < frames; i++) {
-        float cut = expf((float)smooth_next(&inst->sm_cut));   /* log-Hz -> Hz */
+        float cut = cutoff_norm_to_hz((float)smooth_next(&inst->sm_cut)); /* 0..1 -> Hz (log) */
         float res = (float)smooth_next(&inst->sm_res);
-        (void)smooth_next(&inst->sm_drive);                    /* advanced but unused in M1 */
+        float drv = (float)smooth_next(&inst->sm_drive);
         float mix = (float)smooth_next(&inst->sm_mix);
         float og  = (float)smooth_next(&inst->sm_outlin);
 
@@ -223,6 +234,18 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
 
         float xl = audio_inout[i * 2]     / 32768.0f;
         float xr = audio_inout[i * 2 + 1] / 32768.0f;
+
+        /* Pre-filter soft saturation. Input gain into tanh, normalized so a
+         * full-scale input stays ~unity; higher drive pushes more signal into
+         * the nonlinear region (adds harmonics, lifts quiet detail) and feeds
+         * the filter — classic for resonant/acid sweeps. (M3's analog models
+         * will layer their own per-model nonlinearity on top of this.) */
+        if (drv > 0.0005f) {
+            float k = 1.0f + drv * 7.0f;
+            float inv = 1.0f / tanhf(k);
+            xl = tanhf(xl * k) * inv;
+            xr = tanhf(xr * k) * inv;
+        }
 
         float yl = (float)svf_process(&inst->fL, xl);
         float yr = (float)svf_process(&inst->fR, xr);
@@ -244,8 +267,8 @@ static void filter_set_param(void *instance, const char *key, const char *val) {
     float v = atof(val);
 
     if (strcmp(key, "cutoff") == 0) {
-        inst->cutoff_hz = clampf(v, 20.0f, 20000.0f);
-        smooth_target(&inst->sm_cut, logf(inst->cutoff_hz));
+        inst->cutoff = clampf(v, 0.0f, 1.0f);
+        smooth_target(&inst->sm_cut, inst->cutoff);
     } else if (strcmp(key, "resonance") == 0) {
         inst->resonance = clampf(v, 0.0f, 1.0f);
         smooth_target(&inst->sm_res, inst->resonance);
@@ -279,8 +302,8 @@ static void filter_set_param(void *instance, const char *key, const char *val) {
             if (mode_from_string(sval, &m) == 0) inst->mode = m;
         }
         if (json_get_number(val, "cutoff", &fval) == 0) {
-            inst->cutoff_hz = clampf(fval, 20.0f, 20000.0f);
-            smooth_reset(&inst->sm_cut, logf(inst->cutoff_hz));
+            inst->cutoff = clampf(fval, 0.0f, 1.0f);
+            smooth_reset(&inst->sm_cut, inst->cutoff);
         }
         if (json_get_number(val, "resonance", &fval) == 0) {
             inst->resonance = clampf(fval, 0.0f, 1.0f);
@@ -306,7 +329,7 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
     if (!inst) return -1;
 
     if (strcmp(key, "cutoff") == 0)
-        return snprintf(buf, buf_len, "%.0f", inst->cutoff_hz);
+        return snprintf(buf, buf_len, "%.3f", inst->cutoff);
     if (strcmp(key, "resonance") == 0)
         return snprintf(buf, buf_len, "%.2f", inst->resonance);
     if (strcmp(key, "drive") == 0)
@@ -325,9 +348,9 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
     /* State save */
     if (strcmp(key, "state") == 0) {
         return snprintf(buf, buf_len,
-            "{\"model\":\"SVF\",\"mode\":\"%s\",\"cutoff\":%.1f,"
+            "{\"model\":\"SVF\",\"mode\":\"%s\",\"cutoff\":%.3f,"
             "\"resonance\":%.2f,\"drive\":%.2f,\"mix\":%.2f,\"output\":%.1f}",
-            mode_to_string(inst->mode), inst->cutoff_hz,
+            mode_to_string(inst->mode), inst->cutoff,
             inst->resonance, inst->drive, inst->mix, inst->output_db);
     }
 
@@ -338,7 +361,7 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
             "\"levels\":{"
                 "\"root\":{"
                     "\"children\":null,"
-                    "\"knobs\":[\"cutoff\",\"resonance\",\"drive\",\"mix\",\"output\",\"mode\",\"model\"],"
+                    "\"knobs\":[\"cutoff\",\"resonance\",\"drive\",\"mix\",\"output\",\"mode\"],"
                     "\"params\":[\"cutoff\",\"resonance\",\"drive\",\"mix\",\"output\",\"mode\",\"model\"]"
                 "}"
             "}"
@@ -356,10 +379,10 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
         const char *params_json = "["
             "{\"key\":\"model\",\"name\":\"Model\",\"type\":\"enum\",\"options\":[\"SVF\"],\"default\":\"SVF\"},"
             "{\"key\":\"mode\",\"name\":\"Mode\",\"type\":\"enum\",\"options\":[\"LP\",\"HP\",\"BP\",\"Notch\",\"Peak\",\"AP\"],\"default\":\"LP\"},"
-            "{\"key\":\"cutoff\",\"name\":\"Cutoff\",\"type\":\"float\",\"min\":20,\"max\":20000,\"default\":1000,\"step\":1,\"unit\":\"Hz\"},"
-            "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.2,\"step\":0.01},"
-            "{\"key\":\"drive\",\"name\":\"Drive\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0,\"step\":0.01},"
-            "{\"key\":\"mix\",\"name\":\"Mix\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":1,\"step\":0.01},"
+            "{\"key\":\"cutoff\",\"name\":\"Cutoff\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.5,\"step\":0.02,\"unit\":\"%\"},"
+            "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.2,\"step\":0.02,\"unit\":\"%\"},"
+            "{\"key\":\"drive\",\"name\":\"Drive\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0,\"step\":0.02,\"unit\":\"%\"},"
+            "{\"key\":\"mix\",\"name\":\"Mix\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":1,\"step\":0.02,\"unit\":\"%\"},"
             "{\"key\":\"output\",\"name\":\"Output\",\"type\":\"float\",\"min\":-24,\"max\":12,\"default\":0,\"step\":0.5,\"unit\":\"dB\"}"
         "]";
         int len = strlen(params_json);

@@ -25,18 +25,18 @@
           "title": "Knob Mapping",
           "lines": [
             "Knob 1: Cutoff",
-            " 20-20000 Hz",
-            " (log smoothed)",
+            " 0-100%, log",
+            " 20Hz-20kHz",
             "",
             "Knob 2: Resonance",
-            " 0-1, to self-osc",
+            " to self-osc",
             "",
             "Knob 3: Drive",
-            " 0-1 (reserved,",
-            " no-op this ver)",
+            " input saturation",
+            " (pre-filter)",
             "",
             "Knob 4: Mix",
-            " 0-1 dry/wet"
+            " dry/wet"
           ]
         },
         {
@@ -50,11 +50,10 @@
             " LP HP BP Notch",
             " Peak AP",
             "",
-            "Knob 7: Model",
-            " SVF (only one)",
-            "",
-            "Knob 8: unused",
-            " for now"
+            "Model: SVF only",
+            " (in param menu;",
+            " analog models",
+            " coming, see below)"
           ]
         }
       ]

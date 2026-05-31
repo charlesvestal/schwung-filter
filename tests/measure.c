@@ -39,5 +39,29 @@ int main(void) {
     double slope = gain_db(&s, 4000.0) - gain_db(&s, 2000.0);
     CHECK(fabs(slope - (-12.0)) < 2.0, "LP slope ~-12dB/oct (got %.2f)", slope);
 
+    svf_set(&s, 1000.0, 0.0, SVF_HP);
+    CHECK(gain_db(&s, 50.0) < -20.0, "HP rejects sub-cutoff (got %.2f)", gain_db(&s,50.0));
+    CHECK(fabs(gain_db(&s, 10000.0)) < 0.5, "HP passband flat high");
+
+    /* BP raw band tap peaks at 1/k; res=0.5 -> k=1 -> unity (0 dB) at center.
+       (res=0 -> k=2 -> -6 dB at center, since this SVF does not k-normalize the
+       band output.) */
+    svf_set(&s, 1000.0, 0.5, SVF_BP);
+    CHECK(gain_db(&s, 50.0) < -15.0 && gain_db(&s, 20000.0) < -15.0, "BP rejects both ends");
+    CHECK(fabs(gain_db(&s, 1000.0)) < 1.0, "BP ~unity at center (got %.2f)", gain_db(&s,1000.0));
+
+    svf_set(&s, 1000.0, 0.5, SVF_NOTCH);
+    CHECK(gain_db(&s, 1000.0) < -12.0, "Notch nulls at cutoff (got %.2f)", gain_db(&s,1000.0));
+
+    svf_set(&s, 1000.0, 0.0, SVF_AP);
+    CHECK(fabs(gain_db(&s, 500.0)) < 0.5 && fabs(gain_db(&s, 4000.0)) < 0.5, "AP flat magnitude");
+
+    for (double fc=40; fc<18000; fc*=1.5)
+      for (double r=0.0; r<=1.0; r+=0.1) {
+        svf_set(&s, fc, r, SVF_LP); double acc=0;
+        for (int i=0;i<2000;i++) acc += svf_process(&s, (i%2?1.0:-1.0));
+        CHECK(isfinite(acc), "stable fc=%.0f res=%.1f", fc, r);
+      }
+
     return g_fail;
 }

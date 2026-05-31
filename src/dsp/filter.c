@@ -72,6 +72,20 @@ static inline float resonance_taper(float r) {
     return 1.0f - powf(2.0f * RES_Q_MAX, -r);
 }
 
+/* Soft output limiter: transparent (identity) for |x| <= THR so normal-level,
+ * undriven signals stay clean, then a smooth tanh knee saturates peaks toward
+ * LIM instead of hard-clipping at full scale. Prevents the harsh digital clip a
+ * high-resonance peak would otherwise produce. */
+static inline float soft_limit(float x) {
+    const float thr = 0.70f;   /* linear below this */
+    const float lim = 0.98f;   /* output ceiling */
+    float a = fabsf(x);
+    if (a <= thr) return x;
+    float range = lim - thr;
+    float s = (x < 0.0f) ? -1.0f : 1.0f;
+    return s * (thr + range * tanhf((a - thr) / range));
+}
+
 /* ---- JSON helper ---- */
 static int json_get_number(const char *json, const char *key, float *out) {
     char pattern[64];
@@ -262,14 +276,20 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
             xr = tanhf(xr * k) * inv;
         }
 
-        float yl = (float)svf_process(&inst->fL, xl);
-        float yr = (float)svf_process(&inst->fR, xr);
+        /* Resonance makeup: the SVF resonant peak gain ~ Q, which clips hot
+         * inputs at high resonance. Attenuate the WET (filtered) path as Q rises
+         * (gentle 1/4-power of the post-taper damping; ~-8 dB at max res). Wet
+         * only, so a dry / low-mix signal is unaffected. */
+        float kk = 2.0f - 2.0f * res;
+        float g_res = powf(kk * 0.5f, 0.25f);   /* 1.0 at low res .. ~0.41 at max */
+        float wl = (float)svf_process(&inst->fL, xl) * g_res;
+        float wr = (float)svf_process(&inst->fR, xr) * g_res;
 
-        yl = (xl * (1.0f - mix) + yl * mix) * og;
-        yr = (xr * (1.0f - mix) + yr * mix) * og;
+        float yl = (xl * (1.0f - mix) + wl * mix) * og;
+        float yr = (xr * (1.0f - mix) + wr * mix) * og;
 
-        audio_inout[i * 2]     = (int16_t)clampf(yl * 32768.0f, -32768.0f, 32767.0f);
-        audio_inout[i * 2 + 1] = (int16_t)clampf(yr * 32768.0f, -32768.0f, 32767.0f);
+        audio_inout[i * 2]     = (int16_t)(soft_limit(yl) * 32767.0f);
+        audio_inout[i * 2 + 1] = (int16_t)(soft_limit(yr) * 32767.0f);
     }
 }
 

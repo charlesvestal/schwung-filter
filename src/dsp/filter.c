@@ -41,10 +41,11 @@ enum {
     MODEL_MOOG
 };
 
-static const char *MODEL_NAMES[] = { "SVF", "Moog" };
+static const char *MODEL_NAMES[] = { "SVF", "Schwoog" };
 #define MODEL_COUNT 2
 static int model_from_string(const char *s) {
     for (int i = 0; i < MODEL_COUNT; i++) if (strcasecmp(s, MODEL_NAMES[i]) == 0) return i;
+    if (strcasecmp(s, "Moog") == 0) return MODEL_MOOG;   /* backward-compat alias */
     return MODEL_SVF;
 }
 
@@ -363,6 +364,11 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
             moog_set(&inst->moogR, cut, res_raw);
             wl = (float)moog_process(&inst->moogL, xl);
             wr = (float)moog_process(&inst->moogR, xr);
+            /* Fatten: gentle saturation on the ladder output adds harmonics to the
+             * resonance / self-oscillation so it reads as a thick growl rather than
+             * a pure-sine whistle. Near-transparent at low level. */
+            wl = tanhf(wl * 1.6f);
+            wr = tanhf(wr * 1.6f);
         } else {
             /* svf_set called twice/sample (L+R) — acceptable; a later pass can
              * compute coefficients once and copy to the second filter. */
@@ -581,7 +587,7 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
     /* Chain params metadata */
     if (strcmp(key, "chain_params") == 0) {
         const char *params_json = "["
-            "{\"key\":\"model\",\"name\":\"Model\",\"type\":\"enum\",\"options\":[\"SVF\",\"Moog\"],\"default\":\"SVF\"},"
+            "{\"key\":\"model\",\"name\":\"Model\",\"type\":\"enum\",\"options\":[\"SVF\",\"Schwoog\"],\"default\":\"SVF\"},"
             "{\"key\":\"mode\",\"name\":\"Mode\",\"type\":\"enum\",\"options\":[\"LP\",\"HP\",\"BP\",\"Notch\",\"Peak\",\"AP\"],\"default\":\"LP\"},"
             "{\"key\":\"cutoff\",\"name\":\"Cutoff\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.5,\"step\":0.02,\"unit\":\"%\"},"
             "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.2,\"step\":0.02,\"unit\":\"%\"},"

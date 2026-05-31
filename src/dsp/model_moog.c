@@ -34,9 +34,9 @@
 #define MOOG_PI 3.14159265358979323846
 #define VT 0.312          /* thermal voltage (D'Angelo) */
 #define MOOG_OS 2          /* oversample factor */
-#define MOOG_RES_MAX 4.5   /* res=1 -> feedback 4.5; classic ladder self-oscillates
-                            * at feedback ~4.0, confirmed by calibration. res~0.67
-                            * gives the strong pre-self-osc resonance peak. */
+#define MOOG_RES_MAX 4.0   /* res=1 -> feedback 4.0 = the classic ladder self-osc
+                            * threshold, so only the very top whistles and the rest
+                            * of the knob is musical resonance (less whistly). */
 
 void moog_init(moog_t *m, double fs) {
     m->fs = fs;

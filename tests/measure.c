@@ -180,7 +180,7 @@ int main(void) {
         moog_set(&m, 1000.0, 0.7);
         double peak = moog_gain_db(&m, 1000.0);
         double pass = moog_gain_db(&m, 100.0);
-        CHECK(peak - pass > 10.0, "moog resonance peaks above passband (+%.1f dB)", peak - pass);
+        CHECK(peak - pass > 7.0, "moog resonance peaks above passband (+%.1f dB)", peak - pass);
         CHECK(pass < -4.0, "moog low end thins with resonance (got %.1f dB)", pass);
 
         /* max resonance self-oscillates: kick it, let input go silent, the tail

@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include "svf_core.h"
+#include "smoother.h"
 
 #define FS 44100.0
 #define PI 3.14159265358979323846
@@ -62,6 +63,22 @@ int main(void) {
         for (int i=0;i<2000;i++) acc += svf_process(&s, (i%2?1.0:-1.0));
         CHECK(isfinite(acc), "stable fc=%.0f res=%.1f", fc, r);
       }
+
+    smoother_t sm; smooth_init(&sm, FS);
+    /* cutoff smoothed in log space: store log-Hz */
+    smooth_set_tau(&sm, 0.018);                 /* 18 ms */
+    smooth_reset(&sm, log(200.0));
+    svf_t f; svf_init(&f, FS);
+    double prev = 0.0, max_jump = 0.0;
+    for (int i=0;i<8000;i++) {
+        if (i==2000) smooth_target(&sm, log(8000.0)); /* hard step 200->8000 Hz */
+        double fc = exp(smooth_next(&sm));
+        svf_set(&f, fc, 0.7, SVF_LP);
+        double y = svf_process(&f, (i%2?0.5:-0.5));
+        double jump = fabs(y - prev); if (i>10 && jump > max_jump) max_jump = jump;
+        prev = y;
+    }
+    CHECK(max_jump < 0.6, "smoothed cutoff step: max jump %.3f < 0.6", max_jump);
 
     return g_fail;
 }

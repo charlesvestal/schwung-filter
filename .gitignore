@@ -3,3 +3,4 @@ dist/
 *.o
 *.so
 .DS_Store
+tests/measure

@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>   /* strcasecmp (POSIX) — used for tolerant enum parsing */
 #include <math.h>
 #include <stdint.h>
 
@@ -201,6 +202,12 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
     filter_instance_t *inst = (filter_instance_t*)instance;
     if (!inst) return;
 
+    /* Denormal safety: when the input goes silent the SVF integrator state
+     * decays through the denormal range, which is a real RT-performance hazard
+     * on ARM. Today that is flushed by build.sh's -Ofast (-ffast-math sets the
+     * FPSCR FTZ/DAZ bit). If that flag is ever dropped, OR by M3's oversampled
+     * nonlinear models (sustained tiny feedback residue), add an explicit flush
+     * to the per-sample state. Keep -ffast-math until then. */
     for (int i = 0; i < frames; i++) {
         float cut = expf((float)smooth_next(&inst->sm_cut));   /* log-Hz -> Hz */
         float res = (float)smooth_next(&inst->sm_res);

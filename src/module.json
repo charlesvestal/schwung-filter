@@ -26,7 +26,7 @@
             { "key": "env_amount", "label": "Env Amt", "type": "float", "min": -1.0, "max": 1.0, "default": 0.0, "step": 0.02 },
             { "key": "lfo_amount", "label": "LFO Amt", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.02, "unit": "%" },
             { "key": "mode", "label": "Mode", "type": "enum", "options": ["LP", "HP", "BP", "Notch", "Peak", "AP"], "default": "LP" },
-            { "key": "model", "label": "Model", "type": "enum", "options": ["SVF"], "default": "SVF" },
+            { "key": "model", "label": "Model", "type": "enum", "options": ["SVF", "Moog"], "default": "SVF" },
             { "level": "envelope", "label": "Envelope" },
             { "level": "lfo", "label": "LFO" },
             { "level": "output", "label": "Output" }

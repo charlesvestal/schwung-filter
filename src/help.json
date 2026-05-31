@@ -78,10 +78,13 @@
       "title": "Models",
       "lines": [
         "SVF: clean TPT",
-        " state-variable.",
-        " Only model now.",
+        " multimode (all 6",
+        " modes).",
+        "Moog: warm 4-pole",
+        " ladder, 24dB, LP",
+        " only, self-osc.",
         "",
-        "Planned: Moog, SEM,",
+        "Planned: SEM,",
         " Prophet, Roland."
       ]
     }

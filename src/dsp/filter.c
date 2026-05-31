@@ -31,13 +31,22 @@
 #include "svf_core.h"
 #include "smoother.h"
 #include "modulation.h"
+#include "model_moog.h"
 
 #define SAMPLE_RATE 44100.0
 
-/* Models (only SVF in M1) */
+/* Filter models */
 enum {
-    MODEL_SVF = 0
+    MODEL_SVF = 0,
+    MODEL_MOOG
 };
+
+static const char *MODEL_NAMES[] = { "SVF", "Moog" };
+#define MODEL_COUNT 2
+static int model_from_string(const char *s) {
+    for (int i = 0; i < MODEL_COUNT; i++) if (strcasecmp(s, MODEL_NAMES[i]) == 0) return i;
+    return MODEL_SVF;
+}
 
 static inline float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -184,6 +193,7 @@ typedef struct {
 
     /* dsp */
     svf_t fL, fR;
+    moog_t moogL, moogR;
     smoother_t sm_cut;      /* normalized 0..1 (== log-Hz, see cutoff_norm_to_hz) */
     smoother_t sm_res;
     smoother_t sm_drive;
@@ -243,6 +253,8 @@ static void* filter_create_instance(const char *module_dir, const char *config_j
     /* DSP init */
     svf_init(&inst->fL, SAMPLE_RATE);
     svf_init(&inst->fR, SAMPLE_RATE);
+    moog_init(&inst->moogL, SAMPLE_RATE);
+    moog_init(&inst->moogR, SAMPLE_RATE);
     envf_init(&inst->env, SAMPLE_RATE);
     envf_set(&inst->env, inst->env_attack_ms, inst->env_release_ms);
     lfo_init(&inst->lfo, SAMPLE_RATE);
@@ -310,7 +322,8 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
 
     for (int i = 0; i < frames; i++) {
         float base_cut = (float)smooth_next(&inst->sm_cut);               /* normalized 0..1 */
-        float res = resonance_taper((float)smooth_next(&inst->sm_res));   /* even Q, capped */
+        float res_raw = (float)smooth_next(&inst->sm_res);                /* user resonance 0..1 */
+        float res = resonance_taper(res_raw);                            /* SVF: even Q, capped */
         float drv = (float)smooth_next(&inst->sm_drive);
         float mix = (float)smooth_next(&inst->sm_mix);
         float og  = (float)smooth_next(&inst->sm_outlin);
@@ -329,17 +342,11 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
         float cut_norm = clampf(base_cut + env_amt * envv + lfo_amt * lfov, 0.0f, 1.0f);
         float cut = cutoff_norm_to_hz(cut_norm);
 
-        /* NOTE: svf_set is called twice per sample (L and R), recomputing
-         * tan() twice. Acceptable here; a later milestone optimizes by
-         * computing coefficients once and copying them to the second filter. */
-        svf_set(&inst->fL, cut, res, (svf_mode_t)inst->mode);
-        svf_set(&inst->fR, cut, res, (svf_mode_t)inst->mode);
-
         /* Pre-filter soft saturation. Input gain into tanh, normalized so a
          * full-scale input stays ~unity; higher drive pushes more signal into
          * the nonlinear region (adds harmonics, lifts quiet detail) and feeds
-         * the filter — classic for resonant/acid sweeps. (M3's analog models
-         * will layer their own per-model nonlinearity on top of this.) */
+         * the filter — classic for resonant/acid sweeps. (Analog models add their
+         * own intrinsic nonlinearity on top of this.) */
         if (drv > 0.0005f) {
             float k = 1.0f + drv * 7.0f;
             float inv = 1.0f / tanhf(k);
@@ -347,14 +354,25 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
             xr = tanhf(xr * k) * inv;
         }
 
-        /* Resonance makeup: the SVF resonant peak gain ~ Q, which clips hot
-         * inputs at high resonance. Attenuate the WET (filtered) path as Q rises
-         * (gentle 1/4-power of the post-taper damping; ~-8 dB at max res). Wet
-         * only, so a dry / low-mix signal is unaffected. */
-        float kk = 2.0f - 2.0f * res;
-        float g_res = powf(kk * 0.5f, 0.25f);   /* 1.0 at low res .. ~0.41 at max */
-        float wl = (float)svf_process(&inst->fL, xl) * g_res;
-        float wr = (float)svf_process(&inst->fR, xr) * g_res;
+        /* Model dispatch. Moog is a nonlinear 4-pole ladder (LP only; `mode` does
+         * not apply) that self-makeups internally. SVF is the clean multimode with
+         * resonance makeup on the wet path (peak gain ~ Q would otherwise clip). */
+        float wl, wr;
+        if (inst->model == MODEL_MOOG) {
+            moog_set(&inst->moogL, cut, res_raw);
+            moog_set(&inst->moogR, cut, res_raw);
+            wl = (float)moog_process(&inst->moogL, xl);
+            wr = (float)moog_process(&inst->moogR, xr);
+        } else {
+            /* svf_set called twice/sample (L+R) — acceptable; a later pass can
+             * compute coefficients once and copy to the second filter. */
+            svf_set(&inst->fL, cut, res, (svf_mode_t)inst->mode);
+            svf_set(&inst->fR, cut, res, (svf_mode_t)inst->mode);
+            float kk = 2.0f - 2.0f * res;
+            float g_res = powf(kk * 0.5f, 0.25f);   /* 1.0 at low res .. ~0.41 at max */
+            wl = (float)svf_process(&inst->fL, xl) * g_res;
+            wr = (float)svf_process(&inst->fR, xr) * g_res;
+        }
 
         float yl = (xl * (1.0f - mix) + wl * mix) * og;
         float yr = (xr * (1.0f - mix) + wr * mix) * og;
@@ -391,8 +409,7 @@ static void filter_set_param(void *instance, const char *key, const char *val) {
         int m;
         if (mode_from_string(val, &m) == 0) inst->mode = m;
     } else if (strcmp(key, "model") == 0) {
-        if (strcasecmp(val, "SVF") == 0) inst->model = MODEL_SVF;
-        /* ignore unknown models */
+        inst->model = model_from_string(val);
     } else if (strcmp(key, "env_amount") == 0) {
         inst->env_amount = clampf(v, -1.0f, 1.0f);
         smooth_target(&inst->sm_env_amt, inst->env_amount);
@@ -420,9 +437,8 @@ static void filter_set_param(void *instance, const char *key, const char *val) {
         float fval;
         char sval[32];
 
-        if (json_get_string(val, "model", sval, sizeof(sval)) == 0) {
-            if (strcasecmp(sval, "SVF") == 0) inst->model = MODEL_SVF;
-        }
+        if (json_get_string(val, "model", sval, sizeof(sval)) == 0)
+            inst->model = model_from_string(sval);
         if (json_get_string(val, "mode", sval, sizeof(sval)) == 0) {
             int m;
             if (mode_from_string(sval, &m) == 0) inst->mode = m;
@@ -488,7 +504,7 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
     if (strcmp(key, "mode") == 0)
         return snprintf(buf, buf_len, "%s", mode_to_string(inst->mode));
     if (strcmp(key, "model") == 0)
-        return snprintf(buf, buf_len, "SVF");
+        return snprintf(buf, buf_len, "%s", MODEL_NAMES[inst->model]);
     if (strcmp(key, "env_amount") == 0)
         return snprintf(buf, buf_len, "%.2f", inst->env_amount);
     if (strcmp(key, "env_attack") == 0)
@@ -511,12 +527,12 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
     /* State save */
     if (strcmp(key, "state") == 0) {
         return snprintf(buf, buf_len,
-            "{\"model\":\"SVF\",\"mode\":\"%s\",\"cutoff\":%.3f,"
+            "{\"model\":\"%s\",\"mode\":\"%s\",\"cutoff\":%.3f,"
             "\"resonance\":%.2f,\"drive\":%.2f,\"mix\":%.2f,\"output\":%.1f,"
             "\"env_amount\":%.3f,\"env_attack\":%.0f,\"env_release\":%.0f,"
             "\"lfo_amount\":%.3f,\"lfo_shape\":\"%s\",\"lfo_sync\":\"%s\","
             "\"lfo_rate_hz\":%.2f,\"lfo_rate_div\":\"%s\"}",
-            mode_to_string(inst->mode), inst->cutoff,
+            MODEL_NAMES[inst->model], mode_to_string(inst->mode), inst->cutoff,
             inst->resonance, inst->drive, inst->mix, inst->output_db,
             inst->env_amount, inst->env_attack_ms, inst->env_release_ms,
             inst->lfo_amount, LFO_SHAPE_NAMES[inst->lfo_shape],
@@ -565,7 +581,7 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
     /* Chain params metadata */
     if (strcmp(key, "chain_params") == 0) {
         const char *params_json = "["
-            "{\"key\":\"model\",\"name\":\"Model\",\"type\":\"enum\",\"options\":[\"SVF\"],\"default\":\"SVF\"},"
+            "{\"key\":\"model\",\"name\":\"Model\",\"type\":\"enum\",\"options\":[\"SVF\",\"Moog\"],\"default\":\"SVF\"},"
             "{\"key\":\"mode\",\"name\":\"Mode\",\"type\":\"enum\",\"options\":[\"LP\",\"HP\",\"BP\",\"Notch\",\"Peak\",\"AP\"],\"default\":\"LP\"},"
             "{\"key\":\"cutoff\",\"name\":\"Cutoff\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.5,\"step\":0.02,\"unit\":\"%\"},"
             "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.2,\"step\":0.02,\"unit\":\"%\"},"

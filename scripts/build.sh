@@ -53,7 +53,7 @@ ${CROSS_PREFIX}gcc -Ofast -shared -fPIC \
     -march=armv8-a -mtune=cortex-a72 \
     -fomit-frame-pointer -fno-stack-protector \
     -DNDEBUG \
-    src/dsp/filter.c src/dsp/svf_core.c src/dsp/smoother.c src/dsp/modulation.c \
+    src/dsp/filter.c src/dsp/svf_core.c src/dsp/smoother.c src/dsp/modulation.c src/dsp/model_moog.c \
     -o build/filter.so \
     -Isrc/dsp \
     -lm

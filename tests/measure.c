@@ -5,6 +5,7 @@
 #include "svf_core.h"
 #include "smoother.h"
 #include "modulation.h"
+#include "model_moog.h"
 
 #define FS 44100.0
 #define PI 3.14159265358979323846
@@ -28,6 +29,17 @@ static double svf_gain_at(svf_t *s, double f_hz) {
 }
 
 static double gain_db(svf_t *s, double f) { return 20.0*log10(svf_gain_at(s,f)+1e-12); }
+
+/* Moog gain probe at LOW amplitude so the tanh nonlinearity stays ~linear and we
+   measure the filter's frequency response (slope/peak), not saturation. */
+static double moog_gain_at(moog_t *m, double f_hz) {
+    const int warm=8192, meas=8192; const double A=0.05;
+    double w=2.0*PI*f_hz/FS, ph=0.0, sumsq=0.0;
+    for (int i=0;i<warm+meas;i++){ double x=A*sin(ph); ph+=w; if(ph>2*PI)ph-=2*PI;
+        double y=moog_process(m,x); if(i>=warm) sumsq+=y*y; }
+    return sqrt(sumsq/meas)/(A*sqrt(0.5));
+}
+static double moog_gain_db(moog_t *m, double f){ return 20.0*log10(moog_gain_at(m,f)+1e-12); }
 
 /* Max per-sample output jump when cutoff steps 200->8000 Hz mid-stream, probing
    with a steady 300 Hz tone. The tone's own per-sample slew is tiny (~0.02), so a
@@ -150,6 +162,26 @@ int main(void) {
           for (int i=1;i<FS/8;i++){ double v=lfo_process(&l, LFO_SH);
               if (fabs(v-a) > 1e-12) held = 0; }
           CHECK(held, "lfo S&H holds value within a cycle"); }
+    }
+
+    /* ===== M3: Moog ladder model ===== */
+    {
+        moog_t m; moog_init(&m, FS);
+        moog_set(&m, 1000.0, 0.1);
+        CHECK(fabs(moog_gain_db(&m, 100.0)) < 3.0, "moog passband ~flat (got %.2f)", moog_gain_db(&m,100.0));
+        double slope = moog_gain_db(&m, 4000.0) - moog_gain_db(&m, 2000.0);
+        CHECK(slope < -16.0, "moog steep (4-pole) slope (got %.1f dB/oct)", slope);
+
+        moog_set(&m, 1000.0, 0.95);
+        double peak = moog_gain_db(&m, 1000.0);
+        CHECK(peak > 6.0, "moog strong resonant peak at cutoff (got %.1f dB)", peak);
+
+        int stable=1;
+        for (double fc=60; fc<16000; fc*=1.7)
+          for (double r=0.0; r<=1.0; r+=0.2){ moog_set(&m, fc, r); double acc=0;
+            for (int i=0;i<3000;i++) acc += moog_process(&m, (i%2?0.3:-0.3));
+            if (!isfinite(acc)) stable=0; }
+        CHECK(stable, "moog stable across fc/res grid");
     }
 
     return g_fail;

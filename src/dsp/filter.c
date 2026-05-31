@@ -57,6 +57,21 @@ static inline float cutoff_norm_to_hz(float norm) {
     return 20.0f * expf(norm * CUTOFF_LOG_SPAN);
 }
 
+/* Resonance taper: user 0..1 -> effective res for svf_set.
+ * svf_core maps res linearly to damping (k = 2 - 2*res), so raw Q = 1/(2-2res)
+ * crams nearly all the high-Q action into the top few % and runs away to a loud
+ * pure self-oscillator at the very top. Instead, rise Q *exponentially* (even
+ * perceptual sweep) from Q~0.5 to Q~RES_Q_MAX and CAP below runaway, so max is
+ * "screaming but stable". To restore true self-oscillation, raise RES_Q_MAX (or
+ * remove the cap). Derivation: Q = 0.5 * base^r with base = 2*RES_Q_MAX, so
+ * k = 1/Q = 2*base^-r and res_eff = 1 - k/2 = 1 - base^-r. */
+#define RES_Q_MAX 18.0f
+static inline float resonance_taper(float r) {
+    if (r <= 0.0f) return 0.0f;
+    if (r > 1.0f) r = 1.0f;
+    return 1.0f - powf(2.0f * RES_Q_MAX, -r);
+}
+
 /* ---- JSON helper ---- */
 static int json_get_number(const char *json, const char *key, float *out) {
     char pattern[64];
@@ -221,7 +236,7 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
      * to the per-sample state. Keep -ffast-math until then. */
     for (int i = 0; i < frames; i++) {
         float cut = cutoff_norm_to_hz((float)smooth_next(&inst->sm_cut)); /* 0..1 -> Hz (log) */
-        float res = (float)smooth_next(&inst->sm_res);
+        float res = resonance_taper((float)smooth_next(&inst->sm_res));   /* even Q, capped */
         float drv = (float)smooth_next(&inst->sm_drive);
         float mix = (float)smooth_next(&inst->sm_mix);
         float og  = (float)smooth_next(&inst->sm_outlin);

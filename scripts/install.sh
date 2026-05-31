@@ -16,22 +16,22 @@ echo "=== Installing FILTER Module ==="
 
 # Deploy to Move - audio_fx subdirectory
 echo "Copying module to Move..."
-ssh ableton@move.local "mkdir -p /data/UserData/move-anything/modules/audio_fx/filter"
-scp -r dist/filter/* ableton@move.local:/data/UserData/move-anything/modules/audio_fx/filter/
+ssh ableton@move.local "mkdir -p /data/UserData/schwung/modules/audio_fx/filter"
+scp -r dist/filter/* ableton@move.local:/data/UserData/schwung/modules/audio_fx/filter/
 
 # Install chain presets if they exist
 if [ -d "src/patches" ]; then
     echo "Installing chain presets..."
-    ssh ableton@move.local "mkdir -p /data/UserData/move-anything/patches"
-    scp src/patches/*.json ableton@move.local:/data/UserData/move-anything/patches/
+    ssh ableton@move.local "mkdir -p /data/UserData/schwung/patches"
+    scp src/patches/*.json ableton@move.local:/data/UserData/schwung/patches/
 fi
 
 # Set permissions so Module Store can update later
 echo "Setting permissions..."
-ssh ableton@move.local "chmod -R a+rw /data/UserData/move-anything/modules/audio_fx/filter"
+ssh ableton@move.local "chmod -R a+rw /data/UserData/schwung/modules/audio_fx/filter"
 
 echo ""
 echo "=== Install Complete ==="
-echo "Module installed to: /data/UserData/move-anything/modules/audio_fx/filter/"
+echo "Module installed to: /data/UserData/schwung/modules/audio_fx/filter/"
 echo ""
 echo "Restart Move Anything to load the new module."

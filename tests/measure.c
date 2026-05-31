@@ -28,6 +28,27 @@ static double svf_gain_at(svf_t *s, double f_hz) {
 
 static double gain_db(svf_t *s, double f) { return 20.0*log10(svf_gain_at(s,f)+1e-12); }
 
+/* Max per-sample output jump when cutoff steps 200->8000 Hz mid-stream, probing
+   with a steady 300 Hz tone. The tone's own per-sample slew is tiny (~0.02), so a
+   large jump isolates the coefficient-step transient (zipper). 300 Hz also sits in
+   the gain-transition region across the sweep, where a cutoff step is most audible.
+   smoothed=0 steps cutoff instantly; smoothed=1 ramps it in log space. */
+static double antizip_max_jump(int smoothed) {
+    smoother_t sm; smooth_init(&sm, FS); smooth_set_tau(&sm, 0.018); smooth_reset(&sm, log(200.0));
+    svf_t f; svf_init(&f, FS);
+    double prev=0.0, mx=0.0, fc=200.0, ph=0.0, w=2.0*PI*300.0/FS;
+    for (int i=0;i<8000;i++) {
+        if (i==2000) { if (smoothed) smooth_target(&sm, log(8000.0)); else fc=8000.0; }
+        double c = smoothed ? exp(smooth_next(&sm)) : fc;
+        svf_set(&f, c, 0.7, SVF_LP);
+        double x = sin(ph); ph += w; if (ph > 2*PI) ph -= 2*PI;
+        double y = svf_process(&f, x);
+        double j = fabs(y - prev); if (i>10 && j>mx) mx=j;
+        prev = y;
+    }
+    return mx;
+}
+
 int main(void) {
     printf("harness up\n");
 
@@ -64,21 +85,12 @@ int main(void) {
         CHECK(isfinite(acc), "stable fc=%.0f res=%.1f", fc, r);
       }
 
-    smoother_t sm; smooth_init(&sm, FS);
-    /* cutoff smoothed in log space: store log-Hz */
-    smooth_set_tau(&sm, 0.018);                 /* 18 ms */
-    smooth_reset(&sm, log(200.0));
-    svf_t f; svf_init(&f, FS);
-    double prev = 0.0, max_jump = 0.0;
-    for (int i=0;i<8000;i++) {
-        if (i==2000) smooth_target(&sm, log(8000.0)); /* hard step 200->8000 Hz */
-        double fc = exp(smooth_next(&sm));
-        svf_set(&f, fc, 0.7, SVF_LP);
-        double y = svf_process(&f, (i%2?0.5:-0.5));
-        double jump = fabs(y - prev); if (i>10 && jump > max_jump) max_jump = jump;
-        prev = y;
-    }
-    CHECK(max_jump < 0.6, "smoothed cutoff step: max jump %.3f < 0.6", max_jump);
+    /* Anti-zipper: the smoothed cutoff step must not glitch, AND the test must
+       discriminate — an unsmoothed (instant) step on the same signal MUST exceed
+       the threshold, else the test would pass trivially and protect nothing. */
+    double az_smooth = antizip_max_jump(1), az_step = antizip_max_jump(0);
+    CHECK(az_smooth < 0.3, "smoothed cutoff step: jump %.3f < 0.3", az_smooth);
+    CHECK(az_step > 0.6, "unsmoothed step zippers: jump %.3f > 0.6 (test discriminates)", az_step);
 
     return g_fail;
 }

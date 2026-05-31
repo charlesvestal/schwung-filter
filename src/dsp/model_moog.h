@@ -1,20 +1,20 @@
 /*
- * model_moog.h — Moog-style transistor ladder filter (clean-room).
- * 4-pole / 24 dB-per-octave lowpass with tanh nonlinearity in the
- * input+feedback path (the warm, saturating Moog character) and resonance up to
- * self-oscillation. Internally 2x oversampled to tame aliasing from the
- * nonlinearity. Cascade of four TPT one-pole lowpasses (consistent with the SVF
- * core) wrapped in a saturated feedback loop.
+ * model_moog.h — Moog transistor-ladder filter.
+ * C port of Stefano D'Angelo's "ImprovedMoog" (the D'Angelo-Valimaki physically-
+ * derived nonlinear ladder) from ddiakopoulos/MoogLadders, ISC-licensed — see
+ * the copyright header in model_moog.c. Four tanh-saturated stages with thermal
+ * voltage VT, trapezoidal integration; 2x oversampled here for HF coefficient
+ * validity and reduced aliasing.
  */
 #ifndef MODEL_MOOG_H
 #define MODEL_MOOG_H
 
 typedef struct {
-    double fs;       /* base sample rate */
-    double g;        /* TPT one-pole coefficient at the oversampled rate */
-    double fb;       /* feedback amount (resonance), 0..~4 (self-osc near 4) */
-    double s[4];     /* one-pole integrator states */
-    double zfb;      /* one-sample-delayed feedback (at oversampled rate) */
+    double fs;                 /* base sample rate */
+    double V[4], dV[4], tV[4]; /* per-stage integrator/derivative/tanh state */
+    double g;                  /* tuning coefficient (at oversampled rate) */
+    double drive;              /* input drive into the saturators */
+    double resonance;          /* feedback amount (mapped from res 0..1) */
 } moog_t;
 
 void   moog_init(moog_t *m, double fs);

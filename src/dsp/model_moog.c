@@ -3,7 +3,9 @@
 
 #define MOOG_PI 3.14159265358979323846
 #define MOOG_OS 2          /* oversample factor */
-#define MOOG_FB_MAX 4.0    /* feedback at res=1 (>= 4 self-oscillates) */
+#define MOOG_FB_MAX 4.5    /* feedback at res=1 (>= 4 self-oscillates) */
+#define MOOG_DRIVE 2.0     /* intrinsic drive into the saturators (warmth at
+                            * normal levels). Output is compensated by /DRIVE. */
 
 void moog_init(moog_t *m, double fs) {
     m->fs = fs;
@@ -27,22 +29,25 @@ void moog_set(moog_t *m, double fc, double res01) {
 
 /* one tick at the oversampled rate */
 static inline double moog_tick(moog_t *m, double in) {
-    /* Input + feedback through a saturator. Passband makeup ~(1 + 0.5*fb) keeps
-     * the low end from collapsing as resonance (feedback) rises; tanh gives the
-     * Moog warmth and bounds self-oscillation. */
-    double x = in * (1.0 + 0.5 * m->fb) - m->fb * m->zfb;
+    /* Input + feedback. NO resonance makeup on the input, so the low end thins
+     * out as feedback rises (DC gain = 1/(1+fb)) — the classic Moog "honk" that
+     * distinguishes it from the body-preserving SVF. Intrinsic drive pushes the
+     * signal into the saturators so the warmth is audible at normal levels. */
+    double x = in * MOOG_DRIVE - m->fb * m->zfb;
     x = tanh(x);
 
+    /* Four cascaded TPT one-poles, each stage output saturated (the transistor-
+     * pair nonlinearity of a real ladder — more harmonics, gentle compression). */
     double G = m->g / (1.0 + m->g);
     double y = x;
     for (int i = 0; i < 4; i++) {
         double v = (y - m->s[i]) * G;
         double o = v + m->s[i];
         m->s[i] = o + v;
-        y = o;
+        y = tanh(o);
     }
     m->zfb = y;
-    return y;
+    return y / MOOG_DRIVE;   /* compensate intrinsic drive (harmonics remain) */
 }
 
 double moog_process(moog_t *m, double in) {

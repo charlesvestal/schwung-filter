@@ -167,14 +167,30 @@ int main(void) {
     /* ===== M3: Moog ladder model ===== */
     {
         moog_t m; moog_init(&m, FS);
-        moog_set(&m, 1000.0, 0.1);
-        CHECK(fabs(moog_gain_db(&m, 100.0)) < 3.0, "moog passband ~flat (got %.2f)", moog_gain_db(&m,100.0));
+        /* low res: flat passband, steep 4-pole slope */
+        moog_set(&m, 1000.0, 0.0);
+        CHECK(fabs(moog_gain_db(&m, 100.0)) < 2.0, "moog passband flat at low res (got %.2f)", moog_gain_db(&m,100.0));
         double slope = moog_gain_db(&m, 4000.0) - moog_gain_db(&m, 2000.0);
         CHECK(slope < -16.0, "moog steep (4-pole) slope (got %.1f dB/oct)", slope);
 
-        moog_set(&m, 1000.0, 0.95);
+        /* strong resonance just below self-oscillation: resonant peak well above
+         * the passband, AND the low end thins out (the Moog "honk" that
+         * distinguishes it from the body-keeping SVF). Probe is valid here because
+         * the filter isn't self-oscillating yet. */
+        moog_set(&m, 1000.0, 0.7);
         double peak = moog_gain_db(&m, 1000.0);
-        CHECK(peak > 6.0, "moog strong resonant peak at cutoff (got %.1f dB)", peak);
+        double pass = moog_gain_db(&m, 100.0);
+        CHECK(peak - pass > 10.0, "moog resonance peaks above passband (+%.1f dB)", peak - pass);
+        CHECK(pass < -4.0, "moog low end thins with resonance (got %.1f dB)", pass);
+
+        /* max resonance self-oscillates: kick it, let input go silent, the tail
+         * keeps ringing (a sustained limit cycle, bounded by the saturators). */
+        moog_set(&m, 1000.0, 1.0);
+        moog_process(&m, 1.0);
+        for (int i=0;i<4000;i++) moog_process(&m, 0.0);
+        double sq=0; for (int i=0;i<8192;i++){ double y=moog_process(&m,0.0); sq+=y*y; }
+        double osc_rms = sqrt(sq/8192);
+        CHECK(osc_rms > 0.01, "moog self-oscillates at max res (tail rms %.3f)", osc_rms);
 
         int stable=1;
         for (double fc=60; fc<16000; fc*=1.7)

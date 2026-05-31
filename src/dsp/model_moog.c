@@ -34,9 +34,7 @@
 #define MOOG_PI 3.14159265358979323846
 #define VT 0.312          /* thermal voltage (D'Angelo) */
 #define MOOG_OS 2          /* oversample factor */
-#define MOOG_RES_MAX 4.0   /* res=1 -> feedback 4.0 = the classic ladder self-osc
-                            * threshold, so only the very top whistles and the rest
-                            * of the knob is musical resonance (less whistly). */
+#define MOOG_RES_MAX 4.0   /* analog self-osc threshold; compensated per cutoff */
 
 void moog_init(moog_t *m, double fs) {
     m->fs = fs;
@@ -54,10 +52,27 @@ void moog_set(moog_t *m, double fc, double res01) {
     if (fc < 20.0) fc = 20.0;
     if (fc > osfs * 0.45) fc = osfs * 0.45;
     double x = (MOOG_PI * fc) / osfs;
-    m->g = 4.0 * MOOG_PI * VT * fc * (1.0 - x) / (1.0 + x);
+    double warp = (1.0 - x) / (1.0 + x);   /* bilinear warp factor */
+    m->g = 4.0 * MOOG_PI * VT * fc * warp;
     if (res01 < 0.0) res01 = 0.0;
     if (res01 > 1.0) res01 = 1.0;
-    m->resonance = res01 * MOOG_RES_MAX;
+    /* Compensate feedback for the discretization loop-gain excess at high cutoff.
+     * Without this, the digital model self-oscillates at progressively lower
+     * resonance as cutoff rises (54% at 10 kHz vs ~100% at 300 Hz). The onset
+     * tracks warp^~1 but applying raw warp over-corrects at low frequencies.
+     * Empirical fit: scale by warp, but compute the max feedback from the onset
+     * calibration at the reference frequency (300 Hz, onset=4.0). At each cutoff
+     * the target onset is ~4.0/warp_ratio where warp_ratio = warp(fc)/warp(ref).
+     * Simplification: just divide by warp to normalize, capped so low-freq
+     * doesn't exceed the analog limit. */
+    double fb_comp = MOOG_RES_MAX;
+    if (warp > 0.01) {
+        double warp_ref = 0.977;  /* warp at ~300 Hz reference */
+        fb_comp = MOOG_RES_MAX * (warp / warp_ref);
+        if (fb_comp > MOOG_RES_MAX) fb_comp = MOOG_RES_MAX;
+        if (fb_comp < 2.2) fb_comp = 2.2;  /* floor: keep self-osc reachable even at 10 kHz+ */
+    }
+    m->resonance = res01 * fb_comp;
 }
 
 /* one tick at the oversampled rate (D'Angelo's trapezoidal stage updates) */

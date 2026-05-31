@@ -4,6 +4,7 @@
 #include <string.h>
 #include "svf_core.h"
 #include "smoother.h"
+#include "modulation.h"
 
 #define FS 44100.0
 #define PI 3.14159265358979323846
@@ -91,6 +92,65 @@ int main(void) {
     double az_smooth = antizip_max_jump(1), az_step = antizip_max_jump(0);
     CHECK(az_smooth < 0.3, "smoothed cutoff step: jump %.3f < 0.3", az_smooth);
     CHECK(az_step > 0.6, "unsmoothed step zippers: jump %.3f > 0.6 (test discriminates)", az_step);
+
+    /* ===== M2 modulation: envelope follower ===== */
+    {
+        envfollow_t e; envf_init(&e, FS); envf_set(&e, 5.0, 200.0);
+        double env = 0;
+        for (int i=0;i<FS/10;i++) env = envf_process(&e, 1.0);
+        CHECK(env > 0.9, "envf rises to ~1 on full input (got %.3f)", env);
+        CHECK(env <= 1.0001, "envf bounded <=1 (got %.3f)", env);
+        for (int i=0;i<FS/2;i++) env = envf_process(&e, 0.0);
+        CHECK(env < 0.1, "envf decays toward 0 on silence (got %.3f)", env);
+
+        /* attack faster than release: samples for 0->0.5 rising vs 1->0.5 falling.
+         * Must PRIME env to ~1 before measuring the fall (else it starts at 0.5
+         * and crosses immediately). */
+        envfollow_t e2; envf_init(&e2, FS); envf_set(&e2, 5.0, 200.0);
+        int up=0; while (envf_process(&e2, 1.0) < 0.5 && up < (int)FS) up++;
+        for (int i=0;i<FS/10;i++) envf_process(&e2, 1.0);   /* prime to ~1 */
+        int dn=0; while (envf_process(&e2, 0.0) > 0.5 && dn < (int)FS) dn++;
+        CHECK(up < dn, "envf attack (%d) faster than release (%d)", up, dn);
+    }
+
+    /* ===== M2 modulation: LFO ===== */
+    {
+        /* continuous shapes: bipolar and swing the full range over a cycle */
+        int cont[] = { LFO_SINE, LFO_TRI, LFO_SAW, LFO_SQR };
+        for (int si=0; si<4; si++) {
+            int shp = cont[si];
+            lfo_t l; lfo_init(&l, FS); lfo_set_rate_hz(&l, 2.0);
+            double lo=2, hi=-2; int ok=1;
+            for (int i=0;i<FS;i++){ double v=lfo_process(&l, shp);
+                if (v<lo)lo=v; if (v>hi)hi=v; if (!isfinite(v)||v<-1.0001||v>1.0001) ok=0; }
+            CHECK(ok, "lfo shape %d stays in [-1,1]", shp);
+            CHECK(hi>0.5 && lo<-0.5, "lfo shape %d swings full (lo %.2f hi %.2f)", shp, lo, hi);
+        }
+        /* square is exactly +/-1 */
+        { lfo_t l; lfo_init(&l, FS); lfo_set_rate_hz(&l, 1.0);
+          int sq=1; for (int i=0;i<FS;i++){ double v=lfo_process(&l, LFO_SQR);
+              if (fabs(fabs(v)-1.0) > 1e-9) sq=0; }
+          CHECK(sq, "lfo square is exactly +/-1"); }
+        /* 1 Hz period: sine returns near its start value after FS samples */
+        { lfo_t l; lfo_init(&l, FS); lfo_set_rate_hz(&l, 1.0);
+          double first = lfo_process(&l, LFO_SINE);
+          for (int i=1;i<FS;i++) lfo_process(&l, LFO_SINE);
+          double after = lfo_process(&l, LFO_SINE);
+          CHECK(fabs(after-first) < 0.02, "lfo 1Hz cycle returns to start (%.3f vs %.3f)", after, first); }
+        /* S&H: bipolar and varies across many cycles (random, stepwise) */
+        { lfo_t l; lfo_init(&l, FS); lfo_set_rate_hz(&l, 200.0);
+          double lo=2, hi=-2; int ok=1;
+          for (int i=0;i<FS;i++){ double v=lfo_process(&l, LFO_SH);
+              if (v<lo)lo=v; if (v>hi)hi=v; if (!isfinite(v)||v<-1.0001||v>1.0001) ok=0; }
+          CHECK(ok, "lfo S&H stays in [-1,1]");
+          CHECK(hi>0.3 && lo<-0.3, "lfo S&H varies over cycles (lo %.2f hi %.2f)", lo, hi); }
+        /* S&H holds a constant value within one cycle */
+        { lfo_t l; lfo_init(&l, FS); lfo_set_rate_hz(&l, 4.0); /* cycle = FS/4 */
+          double a = lfo_process(&l, LFO_SH); int held = 1;
+          for (int i=1;i<FS/8;i++){ double v=lfo_process(&l, LFO_SH);
+              if (fabs(v-a) > 1e-12) held = 0; }
+          CHECK(held, "lfo S&H holds value within a cycle"); }
+    }
 
     return g_fail;
 }

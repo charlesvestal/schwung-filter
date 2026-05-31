@@ -30,6 +30,7 @@
 #include "audio_fx_api_v1.h"
 #include "svf_core.h"
 #include "smoother.h"
+#include "modulation.h"
 
 #define SAMPLE_RATE 44100.0
 
@@ -142,6 +143,22 @@ static const char* mode_to_string(int mode) {
     }
 }
 
+/* ---- LFO shape <-> string ---- */
+static const char *LFO_SHAPE_NAMES[] = { "Sine", "Tri", "Saw", "Sqr", "S&H" };
+static int lfo_shape_from_string(const char *s) {
+    for (int i = 0; i < 5; i++) if (strcasecmp(s, LFO_SHAPE_NAMES[i]) == 0) return i;
+    return LFO_SINE;
+}
+
+/* ---- LFO tempo divisions: beats (quarter notes) per LFO cycle ---- */
+static const char  *LFO_DIV_NAMES[] = { "1/1","1/2","1/4","1/4.","1/8","1/8.","1/8T","1/16","1/16T","1/32" };
+static const double LFO_DIV_BEATS[] = { 4.0, 2.0, 1.0, 1.5, 0.5, 0.75, 1.0/3.0, 0.25, 1.0/6.0, 0.125 };
+#define LFO_DIV_COUNT 10
+static int lfo_div_from_string(const char *s) {
+    for (int i = 0; i < LFO_DIV_COUNT; i++) if (strcasecmp(s, LFO_DIV_NAMES[i]) == 0) return i;
+    return 4; /* 1/8 */
+}
+
 /* ---- Instance state ---- */
 typedef struct {
     char module_dir[256];
@@ -155,6 +172,16 @@ typedef struct {
     float mix;              /* 0 to 1 */
     float output_db;        /* -24 to 12 */
 
+    /* modulation params */
+    float env_amount;       /* -1..+1 bipolar cutoff mod from envelope follower */
+    float env_attack_ms;    /* 1..500 */
+    float env_release_ms;   /* 1..500 */
+    float lfo_amount;       /* 0..1 cutoff mod depth */
+    int   lfo_shape;        /* lfo_shape_t */
+    int   lfo_sync;         /* 0 = Free (Hz), 1 = Sync (division) */
+    float lfo_rate_hz;      /* 0.01..20, used when Free */
+    int   lfo_rate_div;     /* index into LFO_DIV_*, used when Sync */
+
     /* dsp */
     svf_t fL, fR;
     smoother_t sm_cut;      /* normalized 0..1 (== log-Hz, see cutoff_norm_to_hz) */
@@ -162,6 +189,10 @@ typedef struct {
     smoother_t sm_drive;
     smoother_t sm_mix;
     smoother_t sm_outlin;   /* linear makeup gain */
+    smoother_t sm_env_amt;  /* modulation depths smoothed to avoid zipper */
+    smoother_t sm_lfo_amt;
+    envfollow_t env;
+    lfo_t lfo;
 } filter_instance_t;
 
 /* ---- Globals ---- */
@@ -200,9 +231,21 @@ static void* filter_create_instance(const char *module_dir, const char *config_j
     inst->mix        = 1.0f;
     inst->output_db  = 0.0f;
 
+    inst->env_amount     = 0.0f;
+    inst->env_attack_ms  = 10.0f;
+    inst->env_release_ms = 150.0f;
+    inst->lfo_amount     = 0.0f;
+    inst->lfo_shape      = LFO_SINE;
+    inst->lfo_sync       = 1;        /* default Sync */
+    inst->lfo_rate_hz    = 1.0f;
+    inst->lfo_rate_div   = 4;        /* 1/8 */
+
     /* DSP init */
     svf_init(&inst->fL, SAMPLE_RATE);
     svf_init(&inst->fR, SAMPLE_RATE);
+    envf_init(&inst->env, SAMPLE_RATE);
+    envf_set(&inst->env, inst->env_attack_ms, inst->env_release_ms);
+    lfo_init(&inst->lfo, SAMPLE_RATE);
 
     /* Smoothers */
     smooth_init(&inst->sm_cut, SAMPLE_RATE);
@@ -224,6 +267,14 @@ static void* filter_create_instance(const char *module_dir, const char *config_j
     smooth_init(&inst->sm_outlin, SAMPLE_RATE);
     smooth_set_tau(&inst->sm_outlin, 0.012);
     smooth_reset(&inst->sm_outlin, 1.0f);  /* linear of 0 dB */
+
+    smooth_init(&inst->sm_env_amt, SAMPLE_RATE);
+    smooth_set_tau(&inst->sm_env_amt, 0.015);
+    smooth_reset(&inst->sm_env_amt, 0.0f);
+
+    smooth_init(&inst->sm_lfo_amt, SAMPLE_RATE);
+    smooth_set_tau(&inst->sm_lfo_amt, 0.015);
+    smooth_reset(&inst->sm_lfo_amt, 0.0f);
 
     filter_log("Instance created");
     return inst;
@@ -248,21 +299,41 @@ static void filter_process_block(void *instance, int16_t *audio_inout, int frame
      * FPSCR FTZ/DAZ bit). If that flag is ever dropped, OR by M3's oversampled
      * nonlinear models (sustained tiny feedback residue), add an explicit flush
      * to the per-sample state. Keep -ffast-math until then. */
+    /* LFO rate is computed once per block. Sync derives Hz from host tempo
+     * (get_bpm, NULL-guarded) and the chosen note division; Free uses lfo_rate_hz. */
+    double bpm = (g_host && g_host->get_bpm) ? (double)g_host->get_bpm() : 120.0;
+    if (bpm < 20.0) bpm = 120.0;
+    double lfo_hz = inst->lfo_sync
+        ? (bpm / 60.0) / LFO_DIV_BEATS[inst->lfo_rate_div]   /* cycles/sec */
+        : (double)inst->lfo_rate_hz;
+    lfo_set_rate_hz(&inst->lfo, lfo_hz);
+
     for (int i = 0; i < frames; i++) {
-        float cut = cutoff_norm_to_hz((float)smooth_next(&inst->sm_cut)); /* 0..1 -> Hz (log) */
+        float base_cut = (float)smooth_next(&inst->sm_cut);               /* normalized 0..1 */
         float res = resonance_taper((float)smooth_next(&inst->sm_res));   /* even Q, capped */
         float drv = (float)smooth_next(&inst->sm_drive);
         float mix = (float)smooth_next(&inst->sm_mix);
         float og  = (float)smooth_next(&inst->sm_outlin);
-
-        /* NOTE: svf_set is called twice per sample (L and R), recomputing
-         * tan() twice. Acceptable for M1; a later milestone optimizes by
-         * computing coefficients once and copying them to the second filter. */
-        svf_set(&inst->fL, cut, res, (svf_mode_t)inst->mode);
-        svf_set(&inst->fR, cut, res, (svf_mode_t)inst->mode);
+        float env_amt = (float)smooth_next(&inst->sm_env_amt);
+        float lfo_amt = (float)smooth_next(&inst->sm_lfo_amt);
 
         float xl = audio_inout[i * 2]     / 32768.0f;
         float xr = audio_inout[i * 2 + 1] / 32768.0f;
+
+        /* Modulation: the envelope follower tracks the pre-drive input level; the
+         * LFO free-runs/syncs. Both sum into the NORMALIZED cutoff (so depth is
+         * octave-proportional and respects the manual cutoff as the center), then
+         * map to Hz. env in [0,1], lfo bipolar [-1,1]. */
+        float envv = (float)envf_process(&inst->env, 0.5f * (xl + xr));
+        float lfov = (float)lfo_process(&inst->lfo, inst->lfo_shape);
+        float cut_norm = clampf(base_cut + env_amt * envv + lfo_amt * lfov, 0.0f, 1.0f);
+        float cut = cutoff_norm_to_hz(cut_norm);
+
+        /* NOTE: svf_set is called twice per sample (L and R), recomputing
+         * tan() twice. Acceptable here; a later milestone optimizes by
+         * computing coefficients once and copying them to the second filter. */
+        svf_set(&inst->fL, cut, res, (svf_mode_t)inst->mode);
+        svf_set(&inst->fR, cut, res, (svf_mode_t)inst->mode);
 
         /* Pre-filter soft saturation. Input gain into tanh, normalized so a
          * full-scale input stays ~unity; higher drive pushes more signal into
@@ -322,6 +393,26 @@ static void filter_set_param(void *instance, const char *key, const char *val) {
     } else if (strcmp(key, "model") == 0) {
         if (strcasecmp(val, "SVF") == 0) inst->model = MODEL_SVF;
         /* ignore unknown models */
+    } else if (strcmp(key, "env_amount") == 0) {
+        inst->env_amount = clampf(v, -1.0f, 1.0f);
+        smooth_target(&inst->sm_env_amt, inst->env_amount);
+    } else if (strcmp(key, "env_attack") == 0) {
+        inst->env_attack_ms = clampf(v, 1.0f, 500.0f);
+        envf_set(&inst->env, inst->env_attack_ms, inst->env_release_ms);
+    } else if (strcmp(key, "env_release") == 0) {
+        inst->env_release_ms = clampf(v, 1.0f, 500.0f);
+        envf_set(&inst->env, inst->env_attack_ms, inst->env_release_ms);
+    } else if (strcmp(key, "lfo_amount") == 0) {
+        inst->lfo_amount = clampf(v, 0.0f, 1.0f);
+        smooth_target(&inst->sm_lfo_amt, inst->lfo_amount);
+    } else if (strcmp(key, "lfo_shape") == 0) {
+        inst->lfo_shape = lfo_shape_from_string(val);
+    } else if (strcmp(key, "lfo_sync") == 0) {
+        inst->lfo_sync = (strcasecmp(val, "Sync") == 0) ? 1 : 0;
+    } else if (strcmp(key, "lfo_rate_hz") == 0) {
+        inst->lfo_rate_hz = clampf(v, 0.01f, 20.0f);
+    } else if (strcmp(key, "lfo_rate_div") == 0) {
+        inst->lfo_rate_div = lfo_div_from_string(val);
     } else if (strcmp(key, "state") == 0) {
         /* Restore all parameters from JSON state.
          * Use smooth_reset (instant) so a freshly-loaded patch is immediately
@@ -356,6 +447,27 @@ static void filter_set_param(void *instance, const char *key, const char *val) {
             inst->output_db = clampf(fval, -24.0f, 12.0f);
             smooth_reset(&inst->sm_outlin, db_to_linear(inst->output_db));
         }
+        if (json_get_number(val, "env_amount", &fval) == 0) {
+            inst->env_amount = clampf(fval, -1.0f, 1.0f);
+            smooth_reset(&inst->sm_env_amt, inst->env_amount);
+        }
+        if (json_get_number(val, "env_attack", &fval) == 0)
+            inst->env_attack_ms = clampf(fval, 1.0f, 500.0f);
+        if (json_get_number(val, "env_release", &fval) == 0)
+            inst->env_release_ms = clampf(fval, 1.0f, 500.0f);
+        envf_set(&inst->env, inst->env_attack_ms, inst->env_release_ms);
+        if (json_get_number(val, "lfo_amount", &fval) == 0) {
+            inst->lfo_amount = clampf(fval, 0.0f, 1.0f);
+            smooth_reset(&inst->sm_lfo_amt, inst->lfo_amount);
+        }
+        if (json_get_string(val, "lfo_shape", sval, sizeof(sval)) == 0)
+            inst->lfo_shape = lfo_shape_from_string(sval);
+        if (json_get_string(val, "lfo_sync", sval, sizeof(sval)) == 0)
+            inst->lfo_sync = (strcasecmp(sval, "Sync") == 0) ? 1 : 0;
+        if (json_get_number(val, "lfo_rate_hz", &fval) == 0)
+            inst->lfo_rate_hz = clampf(fval, 0.01f, 20.0f);
+        if (json_get_string(val, "lfo_rate_div", sval, sizeof(sval)) == 0)
+            inst->lfo_rate_div = lfo_div_from_string(sval);
     }
 }
 
@@ -377,6 +489,22 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
         return snprintf(buf, buf_len, "%s", mode_to_string(inst->mode));
     if (strcmp(key, "model") == 0)
         return snprintf(buf, buf_len, "SVF");
+    if (strcmp(key, "env_amount") == 0)
+        return snprintf(buf, buf_len, "%.2f", inst->env_amount);
+    if (strcmp(key, "env_attack") == 0)
+        return snprintf(buf, buf_len, "%.0f", inst->env_attack_ms);
+    if (strcmp(key, "env_release") == 0)
+        return snprintf(buf, buf_len, "%.0f", inst->env_release_ms);
+    if (strcmp(key, "lfo_amount") == 0)
+        return snprintf(buf, buf_len, "%.2f", inst->lfo_amount);
+    if (strcmp(key, "lfo_shape") == 0)
+        return snprintf(buf, buf_len, "%s", LFO_SHAPE_NAMES[inst->lfo_shape]);
+    if (strcmp(key, "lfo_sync") == 0)
+        return snprintf(buf, buf_len, "%s", inst->lfo_sync ? "Sync" : "Free");
+    if (strcmp(key, "lfo_rate_hz") == 0)
+        return snprintf(buf, buf_len, "%.2f", inst->lfo_rate_hz);
+    if (strcmp(key, "lfo_rate_div") == 0)
+        return snprintf(buf, buf_len, "%s", LFO_DIV_NAMES[inst->lfo_rate_div]);
     if (strcmp(key, "name") == 0)
         return snprintf(buf, buf_len, "FILTER");
 
@@ -384,9 +512,16 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
     if (strcmp(key, "state") == 0) {
         return snprintf(buf, buf_len,
             "{\"model\":\"SVF\",\"mode\":\"%s\",\"cutoff\":%.3f,"
-            "\"resonance\":%.2f,\"drive\":%.2f,\"mix\":%.2f,\"output\":%.1f}",
+            "\"resonance\":%.2f,\"drive\":%.2f,\"mix\":%.2f,\"output\":%.1f,"
+            "\"env_amount\":%.3f,\"env_attack\":%.0f,\"env_release\":%.0f,"
+            "\"lfo_amount\":%.3f,\"lfo_shape\":\"%s\",\"lfo_sync\":\"%s\","
+            "\"lfo_rate_hz\":%.2f,\"lfo_rate_div\":\"%s\"}",
             mode_to_string(inst->mode), inst->cutoff,
-            inst->resonance, inst->drive, inst->mix, inst->output_db);
+            inst->resonance, inst->drive, inst->mix, inst->output_db,
+            inst->env_amount, inst->env_attack_ms, inst->env_release_ms,
+            inst->lfo_amount, LFO_SHAPE_NAMES[inst->lfo_shape],
+            inst->lfo_sync ? "Sync" : "Free",
+            inst->lfo_rate_hz, LFO_DIV_NAMES[inst->lfo_rate_div]);
     }
 
     /* UI hierarchy for shadow parameter editor */
@@ -396,8 +531,26 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
             "\"levels\":{"
                 "\"root\":{"
                     "\"children\":null,"
-                    "\"knobs\":[\"cutoff\",\"resonance\",\"drive\",\"mix\",\"output\",\"mode\"],"
-                    "\"params\":[\"cutoff\",\"resonance\",\"drive\",\"mix\",\"output\",\"mode\",\"model\"]"
+                    "\"knobs\":[\"cutoff\",\"resonance\",\"drive\",\"mix\",\"env_amount\",\"lfo_amount\",\"lfo_rate_div\",\"mode\"],"
+                    "\"params\":[\"cutoff\",\"resonance\",\"drive\",\"mix\",\"env_amount\",\"lfo_amount\",\"mode\",\"model\","
+                        "{\"level\":\"envelope\",\"label\":\"Envelope\"},"
+                        "{\"level\":\"lfo\",\"label\":\"LFO\"},"
+                        "{\"level\":\"output\",\"label\":\"Output\"}]"
+                "},"
+                "\"envelope\":{"
+                    "\"label\":\"Envelope\",\"children\":null,"
+                    "\"knobs\":[\"env_amount\",\"env_attack\",\"env_release\"],"
+                    "\"params\":[\"env_amount\",\"env_attack\",\"env_release\"]"
+                "},"
+                "\"lfo\":{"
+                    "\"label\":\"LFO\",\"children\":null,"
+                    "\"knobs\":[\"lfo_amount\",\"lfo_rate_div\",\"lfo_rate_hz\",\"lfo_shape\",\"lfo_sync\"],"
+                    "\"params\":[\"lfo_amount\",\"lfo_shape\",\"lfo_sync\",\"lfo_rate_div\",\"lfo_rate_hz\"]"
+                "},"
+                "\"output\":{"
+                    "\"label\":\"Output\",\"children\":null,"
+                    "\"knobs\":[\"mix\",\"output\"],"
+                    "\"params\":[\"mix\",\"output\"]"
                 "}"
             "}"
         "}";
@@ -418,7 +571,15 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
             "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.2,\"step\":0.02,\"unit\":\"%\"},"
             "{\"key\":\"drive\",\"name\":\"Drive\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0,\"step\":0.02,\"unit\":\"%\"},"
             "{\"key\":\"mix\",\"name\":\"Mix\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":1,\"step\":0.02,\"unit\":\"%\"},"
-            "{\"key\":\"output\",\"name\":\"Output\",\"type\":\"float\",\"min\":-24,\"max\":12,\"default\":0,\"step\":0.5,\"unit\":\"dB\"}"
+            "{\"key\":\"output\",\"name\":\"Output\",\"type\":\"float\",\"min\":-24,\"max\":12,\"default\":0,\"step\":0.5,\"unit\":\"dB\"},"
+            "{\"key\":\"env_amount\",\"name\":\"Env Amt\",\"type\":\"float\",\"min\":-1,\"max\":1,\"default\":0,\"step\":0.02},"
+            "{\"key\":\"env_attack\",\"name\":\"Env Atk\",\"type\":\"float\",\"min\":1,\"max\":500,\"default\":10,\"step\":1,\"unit\":\"ms\"},"
+            "{\"key\":\"env_release\",\"name\":\"Env Rel\",\"type\":\"float\",\"min\":1,\"max\":500,\"default\":150,\"step\":1,\"unit\":\"ms\"},"
+            "{\"key\":\"lfo_amount\",\"name\":\"LFO Amt\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0,\"step\":0.02,\"unit\":\"%\"},"
+            "{\"key\":\"lfo_shape\",\"name\":\"LFO Shape\",\"type\":\"enum\",\"options\":[\"Sine\",\"Tri\",\"Saw\",\"Sqr\",\"S&H\"],\"default\":\"Sine\"},"
+            "{\"key\":\"lfo_sync\",\"name\":\"LFO Sync\",\"type\":\"enum\",\"options\":[\"Free\",\"Sync\"],\"default\":\"Sync\"},"
+            "{\"key\":\"lfo_rate_hz\",\"name\":\"LFO Rate\",\"type\":\"float\",\"min\":0.01,\"max\":20,\"default\":1,\"step\":0.01,\"unit\":\"Hz\"},"
+            "{\"key\":\"lfo_rate_div\",\"name\":\"LFO Div\",\"type\":\"enum\",\"options\":[\"1/1\",\"1/2\",\"1/4\",\"1/4.\",\"1/8\",\"1/8.\",\"1/8T\",\"1/16\",\"1/16T\",\"1/32\"],\"default\":\"1/8\"}"
         "]";
         int len = strlen(params_json);
         if (len < buf_len) {

@@ -5,74 +5,73 @@
       "title": "Overview",
       "lines": [
         "Multi-mode state-",
-        "variable filter.",
+        "variable filter with",
+        "movement.",
         "",
         "Modes: LP HP BP",
         " Notch Peak AP",
         "",
-        "Resonance climbs",
-        "to self-oscillation.",
+        "Envelope follower",
+        "+ tempo-synced LFO",
+        "modulate cutoff.",
         "",
-        "Cutoff is smoothed",
-        "so sweeps don't",
-        "zipper."
+        "Cutoff is log +",
+        "smoothed (no zipper)."
       ]
     },
     {
-      "title": "Controls",
-      "children": [
-        {
-          "title": "Knob Mapping",
-          "lines": [
-            "Knob 1: Cutoff",
-            " 0-100%, log",
-            " 20Hz-20kHz",
-            "",
-            "Knob 2: Resonance",
-            " to self-osc",
-            "",
-            "Knob 3: Drive",
-            " input saturation",
-            " (pre-filter)",
-            "",
-            "Knob 4: Mix",
-            " dry/wet"
-          ]
-        },
-        {
-          "title": "More Knobs",
-          "lines": [
-            "Knob 5: Output",
-            " -24 to 12 dB",
-            " makeup gain",
-            "",
-            "Knob 6: Mode",
-            " LP HP BP Notch",
-            " Peak AP",
-            "",
-            "Model: SVF only",
-            " (in param menu;",
-            " analog models",
-            " coming, see below)"
-          ]
-        }
+      "title": "Knobs (root)",
+      "lines": [
+        "1: Cutoff 0-100%",
+        "   log 20Hz-20kHz",
+        "2: Resonance",
+        "3: Drive (pre-sat)",
+        "4: Mix dry/wet",
+        "5: Env Amount",
+        "   (bipolar)",
+        "6: LFO Amount",
+        "7: LFO Division",
+        "8: Mode"
+      ]
+    },
+    {
+      "title": "Envelope",
+      "lines": [
+        "Auto-wah: cutoff",
+        "follows input level.",
+        "",
+        "Env Amt: depth,",
+        " +opens / -closes",
+        "Attack: 1-500ms",
+        "Release: 1-500ms",
+        "",
+        "No MIDI needed -",
+        "tracks the audio."
+      ]
+    },
+    {
+      "title": "LFO",
+      "lines": [
+        "Cyclic cutoff sweep.",
+        "",
+        "Amount: depth",
+        "Shape: Sine Tri Saw",
+        " Sqr S&H",
+        "Sync: Free or Sync",
+        "Division: 1/1..1/32",
+        " (synced to clock)",
+        "Rate Hz: when Free"
       ]
     },
     {
       "title": "Modes",
       "lines": [
-        "LP: lowpass,",
-        " cuts highs",
-        "HP: highpass,",
-        " cuts lows",
-        "BP: bandpass,",
-        " keeps a band",
-        "Notch: cuts a",
-        " narrow band",
-        "Peak: boosts a",
-        " band (reso)",
-        "AP: allpass,",
-        " phase shift only"
+        "LP: lowpass",
+        "HP: highpass",
+        "BP: bandpass",
+        "Notch: cuts a band",
+        "Peak: boosts (reso)",
+        "AP: allpass (phase)"
       ]
     },
     {
@@ -80,12 +79,9 @@
       "lines": [
         "SVF: clean TPT",
         " state-variable.",
-        " Only model in",
-        " this version.",
+        " Only model now.",
         "",
-        "Planned analog",
-        "models:",
-        " Moog, SEM,",
+        "Planned: Moog, SEM,",
         " Prophet, Roland."
       ]
     }

@@ -1,0 +1,104 @@
+{
+  "id": "filter",
+  "name": "FILTER",
+  "abbrev": "FL",
+  "version": "0.1.0",
+  "description": "Multi-mode filter (SVF) - LP/HP/BP/notch/peak/allpass, resonance to self-oscillation, smoothed cutoff",
+  "author": "charlesvestal",
+  "license": "MIT",
+  "dsp": "filter.so",
+  "api_version": 2,
+  "capabilities": {
+    "chainable": true,
+    "component_type": "audio_fx",
+    "audio_in": true,
+    "ui_hierarchy": {
+      "levels": {
+        "root": {
+          "name": "FILTER",
+          "params": [
+            {
+              "key": "cutoff",
+              "label": "Cutoff",
+              "type": "float",
+              "min": 20.0,
+              "max": 20000.0,
+              "default": 1000.0,
+              "step": 1.0,
+              "unit": "Hz"
+            },
+            {
+              "key": "resonance",
+              "label": "Resonance",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01
+            },
+            {
+              "key": "drive",
+              "label": "Drive",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "mix",
+              "label": "Mix",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 1.0,
+              "step": 0.01
+            },
+            {
+              "key": "output",
+              "label": "Output",
+              "type": "float",
+              "min": -24.0,
+              "max": 12.0,
+              "default": 0.0,
+              "step": 0.5,
+              "unit": "dB"
+            },
+            {
+              "key": "mode",
+              "label": "Mode",
+              "type": "enum",
+              "options": [
+                "LP",
+                "HP",
+                "BP",
+                "Notch",
+                "Peak",
+                "AP"
+              ],
+              "default": "LP"
+            },
+            {
+              "key": "model",
+              "label": "Model",
+              "type": "enum",
+              "options": [
+                "SVF"
+              ],
+              "default": "SVF"
+            }
+          ],
+          "knobs": [
+            "cutoff",
+            "resonance",
+            "drive",
+            "mix",
+            "output",
+            "mode",
+            "model"
+          ]
+        }
+      }
+    }
+  }
+}

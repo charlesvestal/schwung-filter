@@ -1,0 +1,94 @@
+{
+  "title": "Filter",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "Multi-mode state-",
+        "variable filter.",
+        "",
+        "Modes: LP HP BP",
+        " Notch Peak AP",
+        "",
+        "Resonance climbs",
+        "to self-oscillation.",
+        "",
+        "Cutoff is smoothed",
+        "so sweeps don't",
+        "zipper."
+      ]
+    },
+    {
+      "title": "Controls",
+      "children": [
+        {
+          "title": "Knob Mapping",
+          "lines": [
+            "Knob 1: Cutoff",
+            " 20-20000 Hz",
+            " (log smoothed)",
+            "",
+            "Knob 2: Resonance",
+            " 0-1, to self-osc",
+            "",
+            "Knob 3: Drive",
+            " 0-1 (reserved,",
+            " no-op this ver)",
+            "",
+            "Knob 4: Mix",
+            " 0-1 dry/wet"
+          ]
+        },
+        {
+          "title": "More Knobs",
+          "lines": [
+            "Knob 5: Output",
+            " -24 to 12 dB",
+            " makeup gain",
+            "",
+            "Knob 6: Mode",
+            " LP HP BP Notch",
+            " Peak AP",
+            "",
+            "Knob 7: Model",
+            " SVF (only one)",
+            "",
+            "Knob 8: unused",
+            " for now"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Modes",
+      "lines": [
+        "LP: lowpass,",
+        " cuts highs",
+        "HP: highpass,",
+        " cuts lows",
+        "BP: bandpass,",
+        " keeps a band",
+        "Notch: cuts a",
+        " narrow band",
+        "Peak: boosts a",
+        " band (reso)",
+        "AP: allpass,",
+        " phase shift only"
+      ]
+    },
+    {
+      "title": "Models",
+      "lines": [
+        "SVF: clean TPT",
+        " state-variable.",
+        " Only model in",
+        " this version.",
+        "",
+        "Planned analog",
+        "models:",
+        " Moog, SEM,",
+        " Prophet, Roland."
+      ]
+    }
+  ]
+}

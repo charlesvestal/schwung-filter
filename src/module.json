@@ -43,7 +43,7 @@
         },
         "lfo": {
           "label": "LFO",
-          "knobs": ["lfo_amount", "lfo_rate_div", "lfo_rate_hz", "lfo_shape", "lfo_sync"],
+          "knobs": ["lfo_amount", "lfo_rate_hz", "lfo_shape", "lfo_rate_div", "lfo_sync"],
           "params": [
             "lfo_amount",
             { "key": "lfo_shape", "label": "Shape", "type": "enum", "options": ["Sine", "Tri", "Saw", "Sqr", "S&H"], "default": "Sine" },

@@ -566,7 +566,13 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
                 "},"
                 "\"lfo\":{"
                     "\"label\":\"LFO\",\"children\":null,"
-                    "\"knobs\":[\"lfo_amount\",\"lfo_rate_div\",\"lfo_rate_hz\",\"lfo_shape\",\"lfo_sync\"],"
+                    /* Order matters to the knob grid: the LFO graphic is drawn
+                     * over a RUN of adjacent cells, so depth, rate and shape
+                     * have to sit together. With the division enum between
+                     * amount and rate_hz the run was broken and the page drew
+                     * five loose dials instead of one LFO. Division and Sync
+                     * follow it -- they still get their own cells. */
+                    "\"knobs\":[\"lfo_amount\",\"lfo_rate_hz\",\"lfo_shape\",\"lfo_rate_div\",\"lfo_sync\"],"
                     "\"params\":[\"lfo_amount\",\"lfo_shape\",\"lfo_sync\",\"lfo_rate_div\",\"lfo_rate_hz\"]"
                 "},"
                 "\"output\":{"

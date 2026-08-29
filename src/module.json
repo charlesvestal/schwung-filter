@@ -70,6 +70,7 @@
             },
             {
               "key": "env_amount",
+              "short_name": "ENV",
               "label": "Env Amt",
               "type": "float",
               "min": -1,
@@ -79,6 +80,7 @@
             },
             {
               "key": "lfo_amount",
+              "short_name": "AMT",
               "label": "LFO Amt",
               "type": "float",
               "min": 0,
@@ -136,6 +138,7 @@
             "env_amount",
             {
               "key": "env_attack",
+              "short_name": "Atk",
               "label": "Attack",
               "type": "float",
               "min": 1,
@@ -146,6 +149,7 @@
             },
             {
               "key": "env_release",
+              "short_name": "Rel",
               "label": "Release",
               "type": "float",
               "min": 1,
@@ -169,6 +173,7 @@
             "lfo_amount",
             {
               "key": "lfo_shape",
+              "short_name": "Shape",
               "label": "Shape",
               "type": "enum",
               "options": [
@@ -182,6 +187,7 @@
             },
             {
               "key": "lfo_sync",
+              "short_name": "Sync",
               "label": "Sync",
               "type": "enum",
               "options": [
@@ -192,6 +198,7 @@
             },
             {
               "key": "lfo_rate_div",
+              "short_name": "Div",
               "label": "Division",
               "type": "enum",
               "options": [
@@ -210,6 +217,7 @@
             },
             {
               "key": "lfo_rate_hz",
+              "short_name": "Rate",
               "label": "Rate Hz",
               "type": "float",
               "min": 0.01,

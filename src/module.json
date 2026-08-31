@@ -2,7 +2,7 @@
   "id": "filter",
   "name": "FILTER",
   "abbrev": "FL",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Multi-mode filter (SVF) with envelope follower + tempo-synced LFO: LP/HP/BP/notch/peak/allpass, log cutoff, musical resonance, drive",
   "author": "charlesvestal",
   "license": "MIT",

@@ -64,6 +64,24 @@
       ]
     },
     {
+      "title": "Output",
+      "lines": [
+        "Third sub-level off",
+        "root, beside",
+        "Envelope and LFO.",
+        "",
+        "Mix: dry/wet, the",
+        " same control as",
+        " knob 4.",
+        "",
+        "Output: -24 to",
+        " +12dB, 0.5dB",
+        " steps. Gain trim",
+        " applied after the",
+        " dry/wet mix."
+      ]
+    },
+    {
       "title": "Modes",
       "lines": [
         "LP: lowpass",

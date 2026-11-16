@@ -8,7 +8,7 @@
         "variable filter with",
         "movement.",
         "",
-        "Modes: LP HP BP",
+        "Modes: LP HP BPF",
         " Notch Peak AP",
         "",
         "Envelope follower",
@@ -25,13 +25,13 @@
         "1: Cutoff 0-100%",
         "   log 20Hz-20kHz",
         "2: Resonance",
-        "3: Drive (pre-sat)",
-        "4: Mix dry/wet",
-        "5: Env Amount",
+        "3: Mode",
+        "4: Drive (pre-sat)",
+        "5: Mix dry/wet",
+        "6: Env Amount",
         "   (bipolar)",
-        "6: LFO Amount",
-        "7: LFO Division",
-        "8: Mode"
+        "7: LFO Amount",
+        "8: LFO Division"
       ]
     },
     {
@@ -72,7 +72,7 @@
         "",
         "Mix: dry/wet, the",
         " same control as",
-        " knob 4.",
+        " knob 5.",
         "",
         "Output: -24 to",
         " +12dB, 0.5dB",
@@ -86,7 +86,7 @@
       "lines": [
         "LP: lowpass",
         "HP: highpass",
-        "BP: bandpass",
+        "BPF: bandpass",
         "Notch: cuts a band",
         "Peak: boosts (reso)",
         "AP: allpass (phase)"

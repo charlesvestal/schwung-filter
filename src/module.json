@@ -20,12 +20,12 @@
           "knobs": [
             "cutoff",
             "resonance",
+            "mode",
             "drive",
             "mix",
             "env_amount",
             "lfo_amount",
-            "lfo_rate_div",
-            "mode"
+            "lfo_rate_div"
           ],
           "params": [
             {
@@ -96,7 +96,7 @@
               "options": [
                 "LP",
                 "HP",
-                "BP",
+                "BPF",
                 "Notch",
                 "Peak",
                 "AP"

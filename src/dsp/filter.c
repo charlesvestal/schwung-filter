@@ -8,11 +8,11 @@
  *   SVF   - TPT state-variable filter (only model in M1)
  *
  * Modes (svf_mode_t):
- *   LP, HP, BP, Notch, Peak, AP
+ *   LP, HP, BPF, Notch, Peak, AP
  *
  * Parameters:
  *   model      - SVF (only one in M1)
- *   mode       - LP / HP / BP / Notch / Peak / AP
+ *   mode       - LP / HP / BPF / Notch / Peak / AP
  *   cutoff     - cutoff frequency in Hz (20 to 20000), smoothed in LOG space
  *   resonance  - 0 to 1 (k=2..0, Q 0.5..inf, self-osc near 1)
  *   drive      - 0 to 1 (M1: smoothed but NOT applied; nonlinear models in M3 use it)
@@ -134,7 +134,10 @@ static int mode_from_string(const char *s, int *out) {
     if (!s) return -1;
     if (strcasecmp(s, "LP") == 0)         { *out = SVF_LP;    return 0; }
     if (strcasecmp(s, "HP") == 0)         { *out = SVF_HP;    return 0; }
-    if (strcasecmp(s, "BP") == 0)         { *out = SVF_BP;    return 0; }
+    /* "BPF" is the label (see mode_to_string); "BP" is what states saved
+     * before the rename carry. */
+    if (strcasecmp(s, "BPF") == 0 ||
+        strcasecmp(s, "BP") == 0)         { *out = SVF_BP;    return 0; }
     if (strcasecmp(s, "NOTCH") == 0)      { *out = SVF_NOTCH; return 0; }
     if (strcasecmp(s, "PEAK") == 0)       { *out = SVF_PEAK;  return 0; }
     if (strcasecmp(s, "AP") == 0)         { *out = SVF_AP;    return 0; }
@@ -145,7 +148,10 @@ static const char* mode_to_string(int mode) {
     switch (mode) {
         case SVF_LP:    return "LP";
         case SVF_HP:    return "HP";
-        case SVF_BP:    return "BP";
+        /* Not "BP": the host's filter graphic reads the selected option's
+         * text and knows a bandpass as "bandpass"/"bpf" -- a bare "BP" drew
+         * the lowpass curve. */
+        case SVF_BP:    return "BPF";
         case SVF_NOTCH: return "Notch";
         case SVF_PEAK:  return "Peak";
         case SVF_AP:    return "AP";
@@ -553,7 +559,11 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
             "\"levels\":{"
                 "\"root\":{"
                     "\"children\":null,"
-                    "\"knobs\":[\"cutoff\",\"resonance\",\"drive\",\"mix\",\"env_amount\",\"lfo_amount\",\"lfo_rate_div\",\"mode\"],"
+                    /* Mode must sit right after cutoff/resonance: the host's
+                     * filter graphic only adopts a mode knob ADJACENT to the
+                     * pair. Parked on knob 8 it was dropped and the curve
+                     * always drew LP whatever the mode. */
+                    "\"knobs\":[\"cutoff\",\"resonance\",\"mode\",\"drive\",\"mix\",\"env_amount\",\"lfo_amount\",\"lfo_rate_div\"],"
                     "\"params\":[\"cutoff\",\"resonance\",\"drive\",\"mix\",\"env_amount\",\"lfo_amount\",\"mode\",\"model\","
                         "{\"level\":\"envelope\",\"label\":\"Envelope\"},"
                         "{\"level\":\"lfo\",\"label\":\"LFO\"},"
@@ -594,7 +604,7 @@ static int filter_get_param(void *instance, const char *key, char *buf, int buf_
     if (strcmp(key, "chain_params") == 0) {
         const char *params_json = "["
             "{\"key\":\"model\",\"name\":\"Model\",\"type\":\"enum\",\"options\":[\"SVF\",\"Schwoog\"],\"default\":\"SVF\"},"
-            "{\"key\":\"mode\",\"name\":\"Mode\",\"type\":\"enum\",\"options\":[\"LP\",\"HP\",\"BP\",\"Notch\",\"Peak\",\"AP\"],\"default\":\"LP\"},"
+            "{\"key\":\"mode\",\"name\":\"Mode\",\"type\":\"enum\",\"options\":[\"LP\",\"HP\",\"BPF\",\"Notch\",\"Peak\",\"AP\"],\"default\":\"LP\"},"
             "{\"key\":\"cutoff\",\"name\":\"Cutoff\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.5,\"step\":0.02,\"unit\":\"%\"},"
             "{\"key\":\"resonance\",\"name\":\"Resonance\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.2,\"step\":0.02,\"unit\":\"%\"},"
             "{\"key\":\"drive\",\"name\":\"Drive\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0,\"step\":0.02,\"unit\":\"%\"},"
